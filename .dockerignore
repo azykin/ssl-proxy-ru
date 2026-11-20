@@ -4,3 +4,4 @@
 !src/*.mjs
 !certs/
 !certs/tbank-ca.pem
+!package.json
