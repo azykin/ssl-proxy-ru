@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+!certs/tbank-ca.pem
+*.p12
+*.pfx
+*.log
+node_modules/
