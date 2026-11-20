@@ -1,0 +1,66 @@
+name: Gateway tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROXY_DOMAIN: localhost
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Run integration tests
+        run: node --test
+
+      - name: Start the gateway and Caddy
+        run: |
+          set -euo pipefail
+          install -d -m 700 secrets
+          openssl rand -hex 32 > secrets/proxy_key
+          # Local Compose mounts this file directly. Its parent is private to the runner.
+          chmod 0444 secrets/proxy_key
+          docker compose up --build --wait --wait-timeout 120
+
+      - name: Verify the TLS entrance and HTTP refusal
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/caddy-root.crt"
+          bank_path=/rest/tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts
+          # Caddy generates a fresh local CA for the localhost hostname.
+          for attempt in {1..30}; do
+            if docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$root" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          test -s "$root"
+          curl_opts=(--silent --show-error --noproxy '*' --connect-timeout 2 --max-time 5 --output /dev/null --write-out '%{http_code}')
+          tls_opts=(--cacert "$root" --resolve localhost:443:127.0.0.1)
+          status=$(curl "${curl_opts[@]}" "${tls_opts[@]}" --retry 6 --retry-all-errors --retry-delay 1 https://localhost/healthz)
+          test "$status" = 200
+          status=$(curl "${curl_opts[@]}" "${tls_opts[@]}" --json '{}' "https://localhost$bank_path")
+          test "$status" = 401
+          # Valid gateway credentials must reach the inner server. Omit the bank token
+          # so the inner server rejects the request before any external connection.
+          sed 's/^/X-Proxy-Key: /' secrets/proxy_key > secrets/request-header
+          status=$(curl "${curl_opts[@]}" "${tls_opts[@]}" --header @secrets/request-header --json '{}' "https://localhost$bank_path")
+          test "$status" = 400
+          status=$(curl "${curl_opts[@]}" --resolve localhost:80:127.0.0.1 --json '{}' "http://localhost$bank_path")
+          test "$status" = 403
+
+      - name: Clean up
+        if: always()
+        run: |
+          docker compose down --volumes --remove-orphans
+          rm -f secrets/proxy_key secrets/request-header "$RUNNER_TEMP/caddy-root.crt"

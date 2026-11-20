@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!src/
+!src/*.mjs
+!certs/
+!certs/tbank-ca.pem

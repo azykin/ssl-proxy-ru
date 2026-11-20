@@ -1,0 +1,57 @@
+services:
+  gateway:
+    build: .
+    environment:
+      PROXY_KEY_FILE: /run/secrets/proxy_key
+      PROXY_MODE: ${PROXY_MODE:-invest}
+      UPSTREAM_ORIGIN: ${UPSTREAM_ORIGIN:-}
+      RPC_MODE: ${RPC_MODE:-portfolio}
+      EXTRA_RPC_METHODS: ${EXTRA_RPC_METHODS:-}
+      UPSTREAM_ENV: ${UPSTREAM_ENV:-production}
+    secrets:
+      - proxy_key
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/node
+        - --input-type=module
+        - --eval
+        - "const r = await fetch('http://127.0.0.1:8080/healthz', { signal: AbortSignal.timeout(2000) }); process.exit(r.ok ? 0 : 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      PROXY_DOMAIN: ${PROXY_DOMAIN:?Set PROXY_DOMAIN to your public DNS name}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      gateway:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+secrets:
+  proxy_key:
+    file: ./secrets/proxy_key
+
+volumes:
+  caddy_data:
+  caddy_config:

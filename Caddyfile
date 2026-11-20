@@ -1,0 +1,35 @@
+{
+	admin off
+	auto_https disable_redirects
+	grace_period 40s
+	# HTTP error logs may contain custom credential headers and the query string.
+	log default {
+		exclude http
+	}
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_header 8s
+			read_body 20s
+			write 65s
+			idle 60s
+		}
+	}
+}
+
+# Keep port 80 for ACME HTTP challenges. Only TLS requests reach the gateway.
+http://{$PROXY_DOMAIN} {
+	respond 403
+}
+
+https://{$PROXY_DOMAIN} {
+	header Strict-Transport-Security max-age=31536000
+	reverse_proxy gateway:8080 {
+		lb_retries 0
+		transport http {
+			keepalive off
+			dial_timeout 3s
+			response_header_timeout 35s
+		}
+	}
+}
